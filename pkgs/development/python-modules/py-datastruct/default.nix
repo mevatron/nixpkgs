@@ -2,8 +2,7 @@
 
 buildPythonPackage rec {
   pname = "py-datastruct";
-  version =
-    "1.1.0"; # Latest appears to be 2.0.0, but bk7231tools depends on 1.x
+  version = "1.1.0";
   pyproject = true;
 
   src = fetchFromGitHub {
