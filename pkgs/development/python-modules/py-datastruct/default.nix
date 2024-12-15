@@ -1,10 +1,11 @@
 {
   lib,
+  buildPythonPackage,
   fetchFromGitHub,
-  python3,
+  poetry-core
 }:
 
-python3.pkgs.buildPythonPackage rec {
+buildPythonPackage rec {
   pname = "py-datastruct";
   version = "1.1.0"; # Latest appears to be 2.0.0, but bk7231tools depends on 1.x
   pyproject = true;
@@ -16,7 +17,7 @@ python3.pkgs.buildPythonPackage rec {
     hash = "sha256-KEIvibGnQnIDMpmodWN2Az/ypc37ZyGvgVPC7voFmlA=";
   };
 
-  build-system = with python3.pkgs; [ poetry-core ];
+  build-system = [ poetry-core ];
 
   pythonImportsCheck = [ "datastruct" ];
 

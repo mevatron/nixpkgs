@@ -1,10 +1,14 @@
 {
   lib,
+  buildPythonPackage,
   fetchFromGitHub,
-  python3,
+  poetry-core,
+  pycryptodome,
+  py-datastruct,
+  pyserial,
 }:
 
-python3.pkgs.buildPythonApplication rec {
+buildPythonPackage rec {
   pname = "bk7231tools";
   version = "2.0.2";
   pyproject = true;
@@ -17,17 +21,17 @@ python3.pkgs.buildPythonApplication rec {
   };
 
   pythonRelaxDeps = [
-    "pyserial"
     "pycryptodome"
     "py-datastruct"
+    "pyserial"
   ];
 
-  build-system = with python3.pkgs; [ poetry-core ];
+  build-system = [ poetry-core ];
 
-  dependencies = with python3.pkgs; [
-    pyserial
+  dependencies = [
     pycryptodome
     py-datastruct
+    pyserial
   ];
 
   pythonImportsCheck = [ "bk7231tools" ];
