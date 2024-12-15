@@ -1,13 +1,9 @@
-{
-  lib,
-  buildPythonPackage,
-  fetchFromGitHub,
-  poetry-core
-}:
+{ lib, buildPythonPackage, fetchFromGitHub, poetry-core }:
 
 buildPythonPackage rec {
   pname = "py-datastruct";
-  version = "1.1.0"; # Latest appears to be 2.0.0, but bk7231tools depends on 1.x
+  version =
+    "1.1.0"; # Latest appears to be 2.0.0, but bk7231tools depends on 1.x
   pyproject = true;
 
   src = fetchFromGitHub {
@@ -22,7 +18,8 @@ buildPythonPackage rec {
   pythonImportsCheck = [ "datastruct" ];
 
   meta = {
-    description = "Combination of struct and dataclasses for easy parsing of binary formats";
+    description =
+      "Combination of struct and dataclasses for easy parsing of binary formats";
     homepage = "https://github.com/kuba2k2/datastruct";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [ mevatron ];
