@@ -1,0 +1,404 @@
+diff --git a/ltchiptool/gui/main.py b/ltchiptool/gui/main.py
+index 35dba2c..d3d3dfd 100644
+--- a/ltchiptool/gui/main.py
++++ b/ltchiptool/gui/main.py
+@@ -51,8 +51,11 @@ class MainFrame(wx.Frame):
+             wx.Exit()
+             return
+ 
+-        old_config = join(get_app_dir("ltchiptool"), "config.json")
+-        self.config_file = join(get_app_dir("ltchiptool"), "gui.json")
++        old_config = join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "ltchiptool", "config.json")
++        self.config_file = join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "ltchiptool", "gui.json")
++        config_home_parent = os.path.dirname(self.config_file)
++        os.makedirs(config_home_parent, exist_ok=True)
++
+         if isfile(old_config):
+             # migrate old config to new filename
+             if isfile(self.config_file):
+diff --git a/ltchiptool/gui/panels/plugins.py b/ltchiptool/gui/panels/plugins.py
+index ee25cb5..9aef14a 100644
+--- a/ltchiptool/gui/panels/plugins.py
++++ b/ltchiptool/gui/panels/plugins.py
+@@ -1,4 +1,4 @@
+-#  Copyright (c) Kuba Szczodrzyński 2023-5-21.
++# Copyright (c) Kuba Szczodrzyński 2023-5-21.
+ 
+ from dataclasses import dataclass
+ from enum import Enum
+@@ -30,19 +30,19 @@ class PluginModel:
+     @property
+     def distribution(self) -> str:
+         return (
+-            self.plugin
+-            and self.plugin.distribution.name
+-            or self.result
+-            and self.result.distribution
+-            or ""
++                (self.plugin and self.plugin.distribution.name)
++                or (self.result and self.result.distribution)
++                or ""
+         )
+ 
+     @property
+     def title(self) -> str:
+-        namespace = self.namespace
+-        plugin = self.plugin
+-        result = self.result
+-        return plugin and plugin.title or result and result.distribution or namespace
++        return (
++                (self.plugin and self.plugin.title)
++                or (self.result and self.result.distribution)
++                or self.namespace
++                or ""
++        )
+ 
+     @property
+     def has_update(self) -> bool:
+@@ -54,7 +54,7 @@ class PluginModel:
+     def is_disabled(self) -> bool:
+         namespace = self.namespace
+         plugin = self.plugin
+-        return namespace and not plugin or False
++        return bool(namespace and not plugin)
+ 
+     def sort_key(self):
+         return not self.has_update, self.is_disabled, self.title.lower()
+@@ -65,16 +65,26 @@ class PluginsDataModel(PyDataViewModel):
+     def __init__(self):
+         super().__init__()
+         self.items: list[PluginModel] = []
++
++        # Track whether placeholders are currently displayed
++        self.item_no_installed_displayed = False
++        self.item_no_download_displayed = False
++
++        # Constants / references
+         self.Installed = self.ObjectToItem(PluginType.INSTALLED)
+         self.Download = self.ObjectToItem(PluginType.DOWNLOAD)
+         self.item_no_installed = self.ObjectToItem("No plugins installed")
+         self.item_no_download = self.ObjectToItem("Press Download plugins...")
+ 
++        # Initially, let's assume we show these placeholders
++        # Since we have no items yet, add placeholders now
++        self.items.clear()
++
+     def UpdateItems(
+-        self,
+-        disabled: set[str],
+-        plugins: list[PluginBase],
+-        results: list[LPM.SearchResult],
++            self,
++            disabled: set[str],
++            plugins: list[PluginBase],
++            results: list[LPM.SearchResult],
+     ):
+         added: list[PluginModel] = []
+         changed: list[PluginModel] = []
+@@ -88,7 +98,7 @@ class PluginsDataModel(PyDataViewModel):
+ 
+         def by_plugin(value: PluginBase):
+             for model in self.items:
+-                if value == model.plugin or model.namespace == value.namespace:
++                if model.plugin == value or model.namespace == value.namespace:
+                     return model
+             return None
+ 
+@@ -148,12 +158,23 @@ class PluginsDataModel(PyDataViewModel):
+ 
+         installed = [i for i in self.items if i.plugin or i.namespace]
+         download = [i for i in self.items if not i.plugin and i.result]
+-        self.ItemDeleted(self.Installed, self.item_no_installed)
+-        self.ItemDeleted(self.Download, self.item_no_download)
++
++        # Update placeholders
++        # First, remove them if displayed
++        if self.item_no_installed_displayed:
++            self.ItemDeleted(self.Installed, self.item_no_installed)
++            self.item_no_installed_displayed = False
++        if self.item_no_download_displayed:
++            self.ItemDeleted(self.Download, self.item_no_download)
++            self.item_no_download_displayed = False
++
++        # Add them again if needed
+         if not installed:
+             self.ItemAdded(self.Installed, self.item_no_installed)
++            self.item_no_installed_displayed = True
+         if not download:
+             self.ItemAdded(self.Download, self.item_no_download)
++            self.item_no_download_displayed = True
+ 
+     def IsContainer(self, item: DataViewItem):
+         if item == NullDataViewItem:
+@@ -165,56 +186,69 @@ class PluginsDataModel(PyDataViewModel):
+         if item == NullDataViewItem:
+             items = [PluginType.INSTALLED, PluginType.DOWNLOAD]
+         else:
+-            obj: PluginType = self.ItemToObject(item)
+-            match obj:
+-                case PluginType.INSTALLED:
+-                    items = [i for i in self.items if i.plugin or i.namespace]
+-                    if not items:
+-                        children.append(self.item_no_installed)
+-                        return 1
+-                case PluginType.DOWNLOAD:
+-                    items = [i for i in self.items if not i.plugin and i.result]
+-                    if not items:
+-                        children.append(self.item_no_download)
+-                        return 1
+-                case _:
+-                    return 0
+-        for item in items:
+-            children.append(self.ObjectToItem(item))
++            obj = self.ItemToObject(item)
++            if obj == PluginType.INSTALLED:
++                items = [i for i in self.items if i.plugin or i.namespace]
++                if not items:
++                    children.append(self.item_no_installed)
++                    return 1
++            elif obj == PluginType.DOWNLOAD:
++                items = [i for i in self.items if not i.plugin and i.result]
++                if not items:
++                    children.append(self.item_no_download)
++                    return 1
++            else:
++                return 0
++
++        for it in items:
++            children.append(self.ObjectToItem(it))
+         return len(items)
+ 
+     def GetParent(self, item: DataViewItem):
+         if item == NullDataViewItem:
+             return NullDataViewItem
+-        obj: PluginModel | PluginType = self.ItemToObject(item)
+-        if not isinstance(obj, PluginModel):
++        obj = self.ItemToObject(item)
++        if isinstance(obj, PluginModel):
++            if obj.plugin or obj.namespace:
++                return self.Installed
++            if not obj.plugin and obj.result:
++                return self.Download
++        # For PluginType or str placeholders
++        if isinstance(obj, PluginType):
+             return NullDataViewItem
+-        if obj.plugin or obj.namespace:
+-            return self.Installed
+-        if not obj.plugin and obj.result:
+-            return self.Download
++        if isinstance(obj, str):  # placeholders
++            # Determine which parent:
++            if obj == "No plugins installed":
++                return self.Installed
++            if obj == "Press Download plugins...":
++                return self.Download
+         return NullDataViewItem
+ 
+     def GetValue(self, item: DataViewItem, col: int):
+         obj = self.ItemToObject(item)
+-        cols = []
+-        match obj:
+-            case PluginType(value=text):
+-                return text
+-            case str(text) if col == 0:
+-                return text
+-            case PluginModel(namespace, plugin, result):
+-                cols = [
+-                    obj.title,
+-                    (plugin and plugin.version)
+-                    or (namespace and not result and "disabled"),
+-                    result and result.latest,
+-                    plugin and plugin.description or result and result.description,
++        if isinstance(obj, PluginType):
++            if col == 0:
++                return obj.value
++            return ""
++        if isinstance(obj, str):
++            if col == 0:
++                return obj
++            return ""
++        if isinstance(obj, PluginModel):
++            plugin = obj.plugin
++            result = obj.result
++            namespace = obj.namespace
++            cols = [
++                obj.title,
++                (plugin and plugin.version) or (namespace and not result and "disabled") or "",
++                (result and result.latest) or "",
++                (plugin and plugin.description) or (result and result.description) or "",
+                 ]
+-        try:
+-            return cols[col]
+-        except IndexError:
+-            return None
++            try:
++                return cols[col]
++            except IndexError:
++                return ""
++        return ""
+ 
+ 
+ class PluginsPanel(BasePanel):
+@@ -243,6 +277,11 @@ class PluginsPanel(BasePanel):
+         self.InstallButton = self.BindButton("button_install", self.OnInstallClick)
+ 
+     def OnWorkStopped(self, t: PluginsThread):
++        # Ensure this is on the main thread. If it's not, use wx.CallAfter:
++        if not wx.IsMainThread():
++            wx.CallAfter(self.OnWorkStopped, t)
++            return
++
+         super().OnWorkStopped(t)
+         if t.search:
+             self.results = t.results
+@@ -291,61 +330,67 @@ class PluginsPanel(BasePanel):
+         self.InstallInput.SetValue(distribution)
+ 
+     def OnUpdate(self, target: wx.Window = None):
+-        self.InstallButton.Enable(not not self.InstallInput.Value)
++        self.InstallButton.Enable(bool(self.InstallInput.Value))
+ 
+     @with_event
+     def OnItemActivated(self, event: wx.dataview.DataViewEvent):
+         item = event.GetItem()
+         obj = self.model.ItemToObject(item)
+-        match obj:
+-            case PluginType():
+-                if self.Tree.IsExpanded(item):
+-                    self.Tree.Collapse(item)
+-                else:
+-                    self.Tree.Expand(item)
+-            case PluginModel(namespace, plugin, result):
+-                obj: PluginModel
+-                lines = [obj.title, ""]
+-                if obj.has_update:
+-                    lines += [
+-                        "An update is available!",
+-                        f"{obj.plugin.version} -> {obj.result.latest}",
+-                        "",
+-                    ]
+-                if plugin:
+-                    lines += [
+-                        f"Version: {plugin.version}",
+-                        plugin.description and f"Description: {plugin.description}",
+-                        plugin.author and f"Author: {plugin.author}",
+-                        plugin.license and f"License: {plugin.license}",
+-                        f"Type: {plugin.type_text}",
+-                        f"Distribution: {plugin.distribution.name}",
+-                        f"Namespace: {plugin.namespace}",
+-                        f"Module: {plugin.module}",
+-                    ]
+-                elif result:
+-                    lines += [
+-                        f"Distribution: {result.distribution}",
+-                        result.latest and f"Latest version: {result.latest}",
+-                        result.description and f"Description: {result.description}",
+-                    ]
+-                elif namespace:
+-                    lines += [
+-                        "Plugin is now enabled.",
+-                        "It might have been disabled previously, "
+-                        "because of a loading error or manually.",
+-                        "",
+-                        "Relaunch the app to load the plugin.",
+-                    ]
+-                    self.lpm.enable(namespace, rescan=True)
+-                    self.model.UpdateItems(
+-                        disabled=self.lpm.disabled,
+-                        plugins=self.lpm.plugins,
+-                        results=self.results,
+-                    )
+-
+-                message = "\n".join(line for line in lines if line is not None)
+-                wx.MessageBox(message, caption=obj.title)
++
++        if isinstance(obj, PluginType):
++            # Just collapse/expand
++            if self.Tree.IsExpanded(item):
++                self.Tree.Collapse(item)
++            else:
++                self.Tree.Expand(item)
++            return
++
++        if isinstance(obj, PluginModel):
++            lines = [obj.title, ""]
++            if obj.has_update:
++                lines += [
++                    "An update is available!",
++                    f"{obj.plugin.version} -> {obj.result.latest}",
++                    "",
++                ]
++            plugin = obj.plugin
++            namespace = obj.namespace
++            result = obj.result
++            if plugin:
++                lines += [
++                    f"Version: {plugin.version}",
++                    plugin.description and f"Description: {plugin.description}",
++                    plugin.author and f"Author: {plugin.author}",
++                    plugin.license and f"License: {plugin.license}",
++                    f"Type: {plugin.type_text}",
++                    f"Distribution: {plugin.distribution.name}",
++                    f"Namespace: {plugin.namespace}",
++                    f"Module: {plugin.module}",
++                ]
++            elif result:
++                lines += [
++                    f"Distribution: {result.distribution}",
++                    result.latest and f"Latest version: {result.latest}",
++                    result.description and f"Description: {result.description}",
++                ]
++            elif namespace:
++                lines += [
++                    "Plugin is now enabled.",
++                    "It might have been disabled previously, "
++                    "because of a loading error or manually.",
++                    "",
++                    "Relaunch the app to load the plugin.",
++                ]
++                self.lpm.enable(namespace, rescan=True)
++                # Update items again, must be on main thread
++                self.model.UpdateItems(
++                    disabled=self.lpm.disabled,
++                    plugins=self.lpm.plugins,
++                    results=self.results,
++                )
++
++            message = "\n".join(line for line in lines if line)
++            wx.MessageBox(message, caption=obj.title)
+ 
+     @on_event
+     def OnDownloadClick(self):
+diff --git a/ltchiptool/util/lpm.py b/ltchiptool/util/lpm.py
+index 1612767..0534078 100644
+--- a/ltchiptool/util/lpm.py
++++ b/ltchiptool/util/lpm.py
+@@ -2,6 +2,7 @@
+ 
+ import inspect
+ import re
++import os
+ import sys
+ from dataclasses import dataclass
+ from importlib import import_module
+@@ -45,7 +46,7 @@ class LPM:
+         super().__init__()
+         self.plugins = list()
+         self.disabled = set()
+-        self.config_file = join(get_app_dir("ltchiptool"), "plugins.json")
++        self.config_file = join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "ltchiptool", "plugins.json")
+         self.config_load()
+         self.rescan()
+ 
+diff --git a/ltchiptool/util/lvm.py b/ltchiptool/util/lvm.py
+index bd372f6..6aecb6c 100644
+--- a/ltchiptool/util/lvm.py
++++ b/ltchiptool/util/lvm.py
+@@ -98,6 +98,7 @@ class LVM:
+         dirs += [
+             (LVMPlatform.Type.CWD, "."),
+             (LVMPlatform.Type.SNAPSHOT, snapshot_path),
++            (LVMPlatform.Type.SNAPSHOT, join(dirname(__file__), "../libretiny")),
+         ]
+ 
+         for dir_type, dir_path in dirs:
